@@ -160,7 +160,7 @@ class ASRManifestProcessor:
         return self.process_text_by_sample(sample)
 
     def process_text_by_sample(self, sample: collections.ASRAudioText.OUTPUT_TYPE) -> Tuple[List[int], int]:
-        t, tl = sample.text_tokens, len(sample.text_tokens)
+        t, tl = sample[3], len(sample[3])
 
         if self.bos_id is not None:
             t = [self.bos_id] + t
@@ -459,6 +459,11 @@ class _AudioTextDataset(Dataset):
             eos_id=eos_id,
             pad_id=pad_id,
         )
+
+        from multiprocessing import Manager
+        manager = Manager()
+        self.manifest_processor.collection = manager.list(self.manifest_processor.collection)
+
         self.featurizer = WaveformFeaturizer(sample_rate=sample_rate, int_values=int_values, augmentor=augmentor)
         self.trim = trim
         self.return_sample_id = return_sample_id
@@ -469,17 +474,17 @@ class _AudioTextDataset(Dataset):
 
     def __getitem__(self, index):
         sample = self.manifest_processor.collection[index]
-        offset = sample.offset
+        offset = sample[4]
 
         if offset is None:
             offset = 0
 
         features = self.featurizer.process(
-            sample.audio_file,
+            sample[1],
             offset=offset,
-            duration=sample.duration,
+            duration=sample[2],
             trim=self.trim,
-            orig_sr=sample.orig_sr,
+            orig_sr=sample[7],
             channel_selector=self.channel_selector,
         )
         f, fl = features, torch.tensor(features.shape[0]).long()
@@ -945,7 +950,7 @@ class _TarredAudioToTextDataset(IterableDataset):
         manifest_idx = self.manifest_processor.collection.mapping[file_id][offset_id]
         manifest_entry = self.manifest_processor.collection[manifest_idx]
 
-        offset = manifest_entry.offset
+        offset = manifest_entry[4]
         if offset is None:
             offset = 0
 
@@ -954,9 +959,9 @@ class _TarredAudioToTextDataset(IterableDataset):
         features = self.featurizer.process(
             audio_filestream,
             offset=offset,
-            duration=manifest_entry.duration,
+            duration=manifest_entry[2],
             trim=self.trim,
-            orig_sr=manifest_entry.orig_sr,
+            orig_sr=manifest_entry[7],
         )
         audio_filestream.close()
 
@@ -964,7 +969,7 @@ class _TarredAudioToTextDataset(IterableDataset):
         f, fl = features, torch.tensor(features.shape[0]).long()
 
         # Text features
-        t, tl = manifest_entry.text_tokens, len(manifest_entry.text_tokens)
+        t, tl = manifest_entry[3], len(manifest_entry[3])
 
         self.manifest_processor.process_text_by_sample(sample=manifest_entry)
 
